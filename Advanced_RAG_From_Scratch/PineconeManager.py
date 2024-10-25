@@ -107,7 +107,7 @@ class PineconeManager:
 
     def retrieval(self, query: str, namespace: str = "default", top_k: int = 3) -> list:
         vector_store = PineconeVectorStore(index=self.index, embedding=self.embeddings, namespace=namespace)
-        results = vector_store.similarity_search_with_score(query, k=top_k)
+        results_with_metadata = vector_store.similarity_search_with_score(query, k=top_k)
         # results  = vector_store.similarity_search(query)
-        final_results = [res.page_content for res, _ in results]
-        return results, final_results
+        results_only_str = [res.page_content for res, _ in results_with_metadata]
+        return results_with_metadata, results_only_str
