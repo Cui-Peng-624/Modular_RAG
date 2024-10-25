@@ -170,5 +170,77 @@ def rag_fusion_generate(original_user_question: str, info_retrieved: list, model
     return model_response
 
 ##########################################################################################################################################
-# Query transformations 03: Decomposition
+# Query transformations 03: Decomposition - 好像没有retrieve的功能
 ##########################################################################################################################################
+import os
+os.environ["http_proxy"]="127.0.0.1:7890"
+os.environ["https_proxy"]="127.0.0.1:7890"
+
+from dotenv import load_dotenv
+load_dotenv() # 加载 .env 文件
+ZETATECHS_API_KEY = os.getenv('ZETATECHS_API_KEY')
+ZETATECHS_API_BASE = os.getenv('ZETATECHS_API_BASE')
+
+from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
+from operator import itemgetter
+
+# 这里暂时不检验生成的sub-questions的格式
+def decompsition_generate_queries(question: str, num_to_generate: int = 3, model_name: str = "gpt-4o-mini", temperature: float = 0) ->  list:
+    template = f"""You are a helpful assistant that generates multiple sub-questions related to an input question. \n
+    The goal is to break down the input into a set of sub-problems / sub-questions that can be answers in isolation. \n
+    Generate multiple search queries related to: {question} \n
+    Output ({num_to_generate} queries):"""
+    prompt_decomposition = ChatPromptTemplate.from_template(template)
+    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+    generate_queries_decomposition = ( prompt_decomposition | llm | StrOutputParser() | (lambda x: x.split("\n"))) # chain
+    generated_questions = generate_queries_decomposition.invoke({"question":question})
+    return generated_questions
+
+def format_qa_pair(question, answer):
+    """Format Q and A pair"""
+    
+    formatted_string = ""
+    formatted_string += f"Question: {question}\nAnswer: {answer}\n\n"
+    return formatted_string.strip()
+
+def decompsition_generate(generated_questions: list, model_name: str = "gpt-4o-mini", temperature: float = 0) -> str:
+    template = """Here is the question you need to answer:
+
+    \n --- \n {question} \n --- \n
+
+    Here is any available background question + answer pairs:
+
+    \n --- \n {q_a_pairs} \n --- \n
+
+    Here is additional context relevant to the question: 
+
+    \n --- \n {context} \n --- \n
+
+    Use the above context and any background question + answer pairs to answer the question: \n {question}
+    """
+
+    decomposition_prompt = ChatPromptTemplate.from_template(template)
+    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+    q_a_pairs = ""
+    
+    for q in generated_questions:
+        rag_chain = (
+        {"context": itemgetter("question") | retriever, 
+        "question": itemgetter("question"),
+        "q_a_pairs": itemgetter("q_a_pairs")} 
+        | decomposition_prompt
+        | llm
+        | StrOutputParser())
+
+        answer = rag_chain.invoke({"question":q,"q_a_pairs":q_a_pairs})
+        q_a_pair = format_qa_pair(q,answer)
+        q_a_pairs = q_a_pairs + "\n---\n"+  q_a_pair
+
+        return q_a_pairs
+
+
+
+
+
