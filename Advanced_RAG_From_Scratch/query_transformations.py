@@ -89,7 +89,7 @@ def multi_query_generate(original_user_question: str, info_retrieved: list, mode
     return model_response
 
 ##########################################################################################################################################
-# Query transformations 02: RAG-fusion
+# Query transformations 02: RAG-fusion - 暂时还有点疑问
 ##########################################################################################################################################
 from langchain.load import dumps, loads
 
@@ -170,7 +170,7 @@ def rag_fusion_generate(original_user_question: str, info_retrieved: list, model
     return model_response
 
 ##########################################################################################################################################
-# Query transformations 03: Decomposition - 好像没有retrieve的功能
+# Query transformations 03: Decomposition
 ##########################################################################################################################################
 import os
 os.environ["http_proxy"]="127.0.0.1:7890"
@@ -198,47 +198,89 @@ def decompsition_generate_queries(question: str, num_to_generate: int = 3, model
     generated_questions = generate_queries_decomposition.invoke({"question":question})
     return generated_questions
 
-def format_qa_pair(question, answer):
-    """Format Q and A pair"""
-    
+sub_question_with_retrieved_docs_template = """"
+Question: {sub_question}
+Retrieved Documents:
+{documents}
+        
+Please provide an answer based on the retrieved information and question.
+"""
+
+sub_question_with_retrieved_docs_prompt_template = ChatPromptTemplate.from_template(sub_question_with_retrieved_docs_template)
+
+def format_qa_pair(question: str, answer: str) -> str:
     formatted_string = ""
     formatted_string += f"Question: {question}\nAnswer: {answer}\n\n"
-    return formatted_string.strip()
+    # return formatted_string.strip()
+    return formatted_string
 
-def decompsition_generate(generated_questions: list, model_name: str = "gpt-4o-mini", temperature: float = 0) -> str:
-    template = """Here is the question you need to answer:
+# 1. 定义生成最终Prompt的模板
+template = """Here is the question you need to answer:
 
-    \n --- \n {question} \n --- \n
+\n --- \n {question} \n --- \n
 
-    Here is any available background question + answer pairs:
+Here is any available background question + answer pairs:
 
-    \n --- \n {q_a_pairs} \n --- \n
+\n --- \n {q_a_pairs} \n --- \n
 
-    Here is additional context relevant to the question: 
+Here is additional context relevant to the question: 
 
-    \n --- \n {context} \n --- \n
+\n --- \n {context} \n --- \n
 
-    Use the above context and any background question + answer pairs to answer the question: \n {question}
-    """
+Use the above context and any background question + answer pairs to answer the question: \n {question}
+"""
 
-    decomposition_prompt = ChatPromptTemplate.from_template(template)
-    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
-    q_a_pairs = ""
+decomposition_prompt = ChatPromptTemplate.from_template(template)
+
+# 2. 将q_a_pairs和context转化为字符串并构造最终Prompt
+def format_final_prompt(original_question: str, q_a_pairs: list, context: list) -> str:
+    # 将 q_a_pairs 列表转换为字符串，每个pair前加上标识符
+    q_a_pairs_str = "\n".join([f"Q&A Pair {i + 1}:\n{pair}" for i, pair in enumerate(q_a_pairs)])
     
-    for q in generated_questions:
-        rag_chain = (
-        {"context": itemgetter("question") | retriever, 
-        "question": itemgetter("question"),
-        "q_a_pairs": itemgetter("q_a_pairs")} 
-        | decomposition_prompt
-        | llm
-        | StrOutputParser())
+    # 将 context 列表转换为字符串，每个文档前加上标识符
+    context_str = "\n".join([f"Document {i + 1}:\n{doc}" for i, doc in enumerate(context)])
+    
+    # 生成最终的Prompt
+    final_prompt = decomposition_prompt.format(question=original_question, q_a_pairs=q_a_pairs_str, context=context_str)
+    return final_prompt
 
-        answer = rag_chain.invoke({"question":q,"q_a_pairs":q_a_pairs})
-        q_a_pair = format_qa_pair(q,answer)
-        q_a_pairs = q_a_pairs + "\n---\n"+  q_a_pair
+def decompsition_generate_final_prompt(original_question: str, generated_questions: list, docs_per_generated_question: int = 3, model_name: str = "gpt-4o-mini", temperature: float = 0) -> str:
+    """
+    每个循环sub-questions：
+        1. 构建q_a_pairs - （1）到vb中匹配与sub-questions相似的前docs_per_generated_question个文档，（2）将sub-questions和匹配的文档组合成prompt，（3）将prompt输入大模型获得answer，（4）将sub-questions和answer组合成q_a_pairs
+        2. 构建context - 这个简单，每次检索完extend到一个list，最后list(set())去重即可
+    """
+    pinecone_manager = PineconeManager()
+    q_a_pairs = []
+    context = []
+    for generated_question in generated_questions:
+        _, results_only_str = pinecone_manager.retrieval(generated_question, top_k=docs_per_generated_question) # 返回的都是list
+        combined_docs = "\n".join([f"{i + 1}. {doc}" for i, doc in enumerate(results_only_str)])
+        llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+        generate_transition_model_answer_chain = ( sub_question_with_retrieved_docs_prompt_template | llm | StrOutputParser() ) # chain
+        generate_transition_model_answer = generate_transition_model_answer_chain.invoke({"sub_question":generated_question, "documents":combined_docs}) # 得到了generated_question对应的answer
+        q_a_pair = format_qa_pair(generated_question, generate_transition_model_answer) # 构建了q_a_pairs
+        q_a_pairs.append(q_a_pair)
+        context.extend(results_only_str) # 构建了context
 
-        return q_a_pairs
+    context = list(set(context)) # 去重
+
+    # 构建最终的Prompt
+    final_prompt = format_final_prompt(original_question, q_a_pairs, context)
+
+    return final_prompt
+
+def decompsition_generate(final_prompt: str, model_name: str = "gpt-4o-mini", temperature: float = 0.3) -> str:
+    template = """{final_prompt}"""
+    prompt_decomposition = ChatPromptTemplate.from_template(template)
+    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+    generate_answer = ( prompt_decomposition | llm | StrOutputParser() ) # chain
+    generated_answer = generate_answer.invoke({"final_prompt":final_prompt})
+    return generated_answer
+
+##########################################################################################################################################
+# Query transformations 04: Step Back
+##########################################################################################################################################
 
 
 

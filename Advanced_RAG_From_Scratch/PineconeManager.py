@@ -9,6 +9,8 @@ from pinecone import Pinecone, ServerlessSpec
 # from pinecone.grpc import PineconeGRPC as Pinecone
 # from pinecone import ServerlessSpec
 
+from typing import Tuple, List
+
 from langchain_openai import OpenAIEmbeddings
 from langchain.document_loaders import PyPDFLoader # 处理单个PDF
 from langchain.document_loaders import TextLoader # 处理单个TXT
@@ -105,7 +107,7 @@ class PineconeManager:
 
         print(f"Successfully uploaded {len(documents_chunks)} chunks from folder containing PDF and TXT files.")
 
-    def retrieval(self, query: str, namespace: str = "default", top_k: int = 3) -> list:
+    def retrieval(self, query: str, namespace: str = "default", top_k: int = 3) -> Tuple[List, List]:
         vector_store = PineconeVectorStore(index=self.index, embedding=self.embeddings, namespace=namespace)
         results_with_metadata = vector_store.similarity_search_with_score(query, k=top_k)
         # results  = vector_store.similarity_search(query)
