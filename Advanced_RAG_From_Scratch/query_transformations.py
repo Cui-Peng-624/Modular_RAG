@@ -349,3 +349,69 @@ def step_back_single_generate():
 def step_back_multiple_generate():
     pass
 
+##########################################################################################################################################
+# Query transformations 05: HyDE
+##########################################################################################################################################
+import os
+os.environ["http_proxy"]="127.0.0.1:7890"
+os.environ["https_proxy"]="127.0.0.1:7890"
+
+from dotenv import load_dotenv # type: ignore
+load_dotenv() # 加载 .env 文件
+ZETATECHS_API_KEY = os.getenv('ZETATECHS_API_KEY')
+ZETATECHS_API_BASE = os.getenv('ZETATECHS_API_BASE')
+
+from langchain.prompts import ChatPromptTemplate # type: ignore
+from langchain_core.output_parsers import StrOutputParser # type: ignore
+from langchain_openai import ChatOpenAI # type: ignore
+
+from ChromaManager import ChromaVectorStoreManager
+
+def HyDE_generate_HyD_and_retrieval(question: str, model_name: str = "gpt-4o-mini", temperature: float = 0.3, search_type: str = "mmr", k: int = 3, lambda_mult: float = 0.5) -> tuple:
+    """
+    search_type:  “similarity” (default), “mmr”, or “similarity_score_threshold”.
+    文档链接：https://python.langchain.com/api_reference/chroma/vectorstores/langchain_chroma.vectorstores.Chroma.html#langchain_chroma.vectorstores.Chroma.as_retriever
+    """
+    chroma_store = ChromaVectorStoreManager()
+    chroma_vector_store = chroma_store.get_vector_store()
+    retriever = chroma_vector_store.as_retriever(search_type=search_type, 
+                                                 search_kwargs = {"k": k, "lambda_mult": lambda_mult})
+    # HyDE document genration
+    template = """Please write a scientific paper passage to answer the question
+    Question: {question}
+    Passage:"""
+
+    prompt_hyde = ChatPromptTemplate.from_template(template)
+
+    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+
+    generate_docs_for_retrieval_chain = (
+        prompt_hyde | llm | StrOutputParser() 
+    )
+
+    generated_docs = generate_docs_for_retrieval_chain.invoke({"question":question})
+    retrieval_chain = generate_docs_for_retrieval_chain | retriever 
+    retireved_docs = retrieval_chain.invoke({"question":question})
+    return generated_docs, retireved_docs
+
+def HyDE_generate(retireved_docs: list, original_question: str, model_name: str = "gpt-4o-mini", temperature: float = 0.3):
+    template = """Answer the following question based on this context:
+
+    {context}
+
+    Question: {question}
+    """
+
+    prompt = ChatPromptTemplate.from_template(template)
+
+    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+
+    final_rag_chain = (
+        prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    generated_answer = final_rag_chain.invoke({"context":retireved_docs,"question":original_question})
+
+    return generated_answer
