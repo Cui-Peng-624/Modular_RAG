@@ -198,42 +198,33 @@ def decompsition_generate_queries(question: str, num_to_generate: int = 3, model
     generated_questions = generate_queries_decomposition.invoke({"question":question})
     return generated_questions
 
-sub_question_with_retrieved_docs_template = """"
-Question: {sub_question}
-Retrieved Documents:
-{documents}
-        
-Please provide an answer based on the retrieved information and question.
-"""
-
-sub_question_with_retrieved_docs_prompt_template = ChatPromptTemplate.from_template(sub_question_with_retrieved_docs_template)
-
 def format_qa_pair(question: str, answer: str) -> str:
     formatted_string = ""
     formatted_string += f"Question: {question}\nAnswer: {answer}\n\n"
     # return formatted_string.strip()
     return formatted_string
 
-# 1. 定义生成最终Prompt的模板
-template = """Here is the question you need to answer:
-
-\n --- \n {question} \n --- \n
-
-Here is any available background question + answer pairs:
-
-\n --- \n {q_a_pairs} \n --- \n
-
-Here is additional context relevant to the question: 
-
-\n --- \n {context} \n --- \n
-
-Use the above context and any background question + answer pairs to answer the question: \n {question}
-"""
-
-decomposition_prompt = ChatPromptTemplate.from_template(template)
-
 # 2. 将q_a_pairs和context转化为字符串并构造最终Prompt
 def format_final_prompt(original_question: str, q_a_pairs: list, context: list) -> str:
+
+    # 1. 定义生成最终Prompt的模板
+    template = """Here is the question you need to answer:
+
+    \n --- \n {question} \n --- \n
+
+    Here is any available background question + answer pairs:
+
+    \n --- \n {q_a_pairs} \n --- \n
+
+    Here is additional context relevant to the question: 
+
+    \n --- \n {context} \n --- \n
+
+    Use the above context and any background question + answer pairs to answer the question: \n {question}
+    """
+
+    decomposition_prompt = ChatPromptTemplate.from_template(template)
+
     # 将 q_a_pairs 列表转换为字符串，每个pair前加上标识符
     q_a_pairs_str = "\n".join([f"Q&A Pair {i + 1}:\n{pair}" for i, pair in enumerate(q_a_pairs)])
     
@@ -250,6 +241,16 @@ def decompsition_generate_final_prompt(original_question: str, generated_questio
         1. 构建q_a_pairs - （1）到vb中匹配与sub-questions相似的前docs_per_generated_question个文档，（2）将sub-questions和匹配的文档组合成prompt，（3）将prompt输入大模型获得answer，（4）将sub-questions和answer组合成q_a_pairs
         2. 构建context - 这个简单，每次检索完extend到一个list，最后list(set())去重即可
     """
+    sub_question_with_retrieved_docs_template = """"
+    Question: {sub_question}
+    Retrieved Documents:
+    {documents}
+            
+    Please provide an answer based on the retrieved information and question.
+    """
+
+    sub_question_with_retrieved_docs_prompt_template = ChatPromptTemplate.from_template(sub_question_with_retrieved_docs_template)
+
     pinecone_manager = PineconeManager()
     q_a_pairs = []
     context = []
@@ -279,10 +280,72 @@ def decompsition_generate(final_prompt: str, model_name: str = "gpt-4o-mini", te
     return generated_answer
 
 ##########################################################################################################################################
-# Query transformations 04: Step Back
+# Query transformations 04: Step Back：
+# 1. 更抽线的问题使用step-back，而更具体的问题使用sub-question
+# 2. 其中包含FewShotChatMessagePromptTemplate是实现 Few-Shot 学习的强大工具
+# 3. 实现step-back的方法还是使用提示词工程，利用其中包含FewShotChatMessagePromptTemplate去实现
+
+# 问题：
+# 1. 虽然说是step back，不过它在我们的示例中表现似乎不是那么好，跟decomposition生成的prompt差不多
 ##########################################################################################################################################
+from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
 
+# 使用静态的step_back_examples
+def step_back_static_generate_queries(question: str, model_name: str = "gpt-4o-mini", temperature: float = 0.3) -> list:
+    step_back_examples = [ # 定义了一些step-back的例子 - 这些具体例子可以更具我们的具体任务进行扩充
+        {
+            "input": "Could the members of The Police perform lawful arrests?",
+            "output": "what can the members of The Police do?",
+        },
+        {
+            "input": "Jan Sindel’s was born in what country?",
+            "output": "what is Jan Sindel’s personal history?",
+        },
+    ]
 
+    # We now transform these to example messages
+    example_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("human", "{input}"),
+            ("ai", "{output}"),
+        ]
+    )
 
+    few_shot_prompt = FewShotChatMessagePromptTemplate(
+        example_prompt=example_prompt,
+        examples=step_back_examples,
+    )
 
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                f"""You are an expert at world knowledge. Your task is to step back and paraphrase a question to a more generic step-back question, which is easier to answer. Here are a few examples:""", # 这里的system prompt也需要根据我们的具体任务进行修改
+            ),
+            # Few shot examples
+            few_shot_prompt,
+            # New question
+            ("user", "{question}"),
+        ]
+    )
+
+    llm = ChatOpenAI(api_key = ZETATECHS_API_KEY, base_url = ZETATECHS_API_BASE, model = model_name, temperature = temperature)
+    generate_queries_step_back = ( prompt | llm | StrOutputParser() | (lambda x: x.split("\n")) ) # -> list
+    # generate_queries_step_back = prompt | llm | StrOutputParser() -> str
+    generated_queries = generate_queries_step_back.invoke({"question": question})
+    return generated_queries
+
+# 动态地挑选step_back_examples
+def step_back_dynamic_generate_queries(question: str, model_name: str = "gpt-4o-mini", temperature: float = 0) -> list:
+    pass
+
+# 只生成一个 step back question，然后回答
+def step_back_single_generate():
+    pass
+
+# 多轮生成step back question，然后逐个回答，类似与思维链
+def step_back_multiple_generate():
+    pass
 
