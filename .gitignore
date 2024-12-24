@@ -1,2 +1,4 @@
 .env
-Advanced_RAG_From_Scratch/__pycache__
+pictures/
+rag_from_scratch/
+refactor/
