@@ -45,20 +45,78 @@ class ModelManage:
             else:
                 raise ValueError(f"Unsupported model type: {self.model_type}. We only support 'gemma-2-9b' in this task.")
 
-    def generate(self, user_prompt: str, **kwargs) -> str: # 该generate函数用于生成任意回答，仅需要输入user_prompt即可。kwargs包含但不限于：system_prompt，max_tokens
+    def generate(self, user_prompt: str, mode: str = "normal", model_name: str = "gpt-4o-mini-2024-07-18", **kwargs) -> str:
+        """
+        该generate函数用于生成任意回答，仅需要输入user_prompt即可。
+        
+        mode: 
+            normal: 正常模式
+            structured: 结构化输出模式
+        
+        kwargs包含但不限于：system_prompt，max_tokens
+        """
         # 获取特定的关键字参数
         system_prompt = kwargs.get("system_prompt", "You are a helpful assistant.")  # 如果没有提供 system_prompt 参数，则使用默认值
-        max_tokens = kwargs.get("max_tokens", 256)  # 如果没有提供 max_tokens 参数，则使用默认值 256
+        max_tokens = kwargs.get("max_tokens", 512)  # 如果没有提供 max_tokens 参数，则使用默认值 256
+        response_format = kwargs.get("response_format", None) # 获取response_format参数
 
-        if self.model_type == "api":
-            messages_to_model = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-
-            response = self.model.chat.completions.create(model=self.model_name, messages=messages_to_model)
+        messages_to_model = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        if mode == "normal": # 如果是normal模式，则不需要使用传入的model_name参数
+            if self.model_type == "api":
+                response = self.model.chat.completions.create(model=self.model_name, messages=messages_to_model)
+                return response.choices[0].message.content
+            elif self.model_type == "local":
+                pass
+        elif mode == "structured": # 如果是structured模式，则需要使用传入的model_name参数 - 本地大模型也没有json mode
+            response = self.model.chat.completions.create(model=model_name, messages=messages_to_model, response_format=response_format)
             return response.choices[0].message.content
-        elif self.model_type == "local":
-            outputs = self.model(user_prompt, max_new_tokens=max_tokens)
-            response = outputs[0]["generated_text"]
-            return response
+
+    def generate_with_context(self, user_query: str, context_chunks: list, **kwargs) -> str:
+        """
+        结合用户查询和上下文chunks生成回答
+
+        参数:
+            user_query: str - 用户的查询/问题
+            context_chunks: list - 从数据库检索到的相关文本块列表
+            **kwargs: 传递给 generate 函数的额外参数
+
+        返回:
+            str: 生成的回答
+        """
+        # 将context chunks格式化组合，添加编号和分隔符
+        formatted_chunks = []
+        for i, chunk in enumerate(context_chunks):
+            # 移除多余的空白字符并格式化文本块
+            cleaned_chunk = " ".join(chunk.split())
+            formatted_chunk = f"[文档片段 {i}]\n{cleaned_chunk}\n"
+            formatted_chunks.append(formatted_chunk)
+        
+        # 使用分隔线连接chunks
+        combined_context = "\n---\n".join(formatted_chunks)
+        
+        # 构建带有上下文的提示语
+        prompt_template = f"""请基于以下背景信息回答用户的问题。背景信息按相关性排序，包含多个文档片段。
+
+背景信息：
+{combined_context}
+
+用户问题：
+{user_query}
+
+请根据以上背景信息回答用户问题。如果引用特定文档片段的内容，请注明片段编号。如果背景信息中没有相关内容，请如实告知。请确保回答准确、完整且易于理解。"""
+
+        # 添加默认的system prompt（如果在kwargs中没有指定）
+        if "system_prompt" not in kwargs:
+            kwargs["system_prompt"] = "你是一个帮助助手。请基于提供的背景信息回答问题，保持准确性和客观性。引用信息时请标明来源。"
+
+        # 调用generate函数生成回答
+        response = self.generate(
+            user_prompt=prompt_template,
+            **kwargs
+        )
+
+        return response

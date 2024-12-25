@@ -10,3 +10,5 @@
 
 2024-12-25：
 - 完善混合搜索模式
+- 支持json mode
+- multi-query 和 decomposition 实现

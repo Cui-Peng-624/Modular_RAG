@@ -260,3 +260,74 @@ class ChromaManager:
         # 4. 根据混合得分排序并返回top-k结果
         hybrid_results.sort(key=lambda x: x['score'], reverse=True)
         return hybrid_results[:k]
+
+    # 综合了上述的三种搜索模式，返回list[str]
+    def search(self, query: str, mode: str = "hybrid", k: int = 3, **kwargs) -> list[str]:
+        """
+        根据指定的搜索模式获取检索结果并返回内容列表
+        
+        Args:
+            query: 查询文本
+            mode: 搜索模式，可选值为 "hybrid", "similarity", "similarity_with_score"
+            k: 返回的结果数量
+            **kwargs: 其他参数，比如hybrid_search的dense_weight
+            
+        Returns:
+            list[str]: 检索到的文档内容列表
+            
+        Raises:
+            ValueError: 当指定的mode不支持时抛出异常
+        """
+        # 验证搜索模式
+        valid_modes = ["hybrid", "similarity", "similarity_with_score"]
+        if mode not in valid_modes:
+            raise ValueError(f"不支持的搜索模式: {mode}。支持的模式包括: {', '.join(valid_modes)}")
+        
+        # 根据不同模式获取搜索结果
+        if mode == "hybrid":
+            dense_weight = kwargs.get("dense_weight", 0.5)
+            results = self.hybrid_search(query, k=k, dense_weight=dense_weight)
+            contents = [result["content"] for result in results]
+            
+        elif mode == "similarity":
+            results = self.similarity_search(query, k=k)
+            contents = [result["content"] for result in results]
+            
+        else:  # similarity_with_score
+            results = self.similarity_search_with_score(query, k=k)
+            contents = [result["content"] for result in results]
+        
+        return contents
+
+    # 获取格式化的上下文字符串。此函数会先调用get_combined_contents获取内容列表，
+    # 然后将其转换为格式化的字符串。
+    def get_formatted_context(self, query: str, mode: str = "hybrid", k: int = 3, **kwargs) -> str:
+        """
+        获取格式化的上下文字符串。此函数会先调用get_combined_contents获取内容列表，
+        然后将其转换为格式化的字符串。
+        
+        Args:
+            query: 查询文本
+            mode: 搜索模式，可选值为 "hybrid", "similarity", "similarity_with_score"
+            k: 返回的结果数量
+            **kwargs: 其他参数，比如hybrid_search的dense_weight
+            
+        Returns:
+            str: 格式化后的上下文字符串
+        """
+        # 获取内容列表
+        contents = self.search(query, mode=mode, k=k, **kwargs)
+        
+        # 格式化每个文档片段
+        formatted_chunks = []
+        for i, content in enumerate(contents, 1):
+            # 清理文本（移除多余的空白字符）
+            cleaned_content = " ".join(content.split())
+            # 添加编号和格式化
+            formatted_chunk = f"[文档片段 {i}]\n{cleaned_content}"
+            formatted_chunks.append(formatted_chunk)
+        
+        # 使用分隔线连接所有文档片段
+        formatted_context = "\n\n---\n\n".join(formatted_chunks)
+        
+        return formatted_context
