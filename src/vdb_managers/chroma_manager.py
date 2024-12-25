@@ -22,19 +22,18 @@ from document_processors.splitter import DocumentSplitter
 from sparse_retrievers.bm25_manager import BM25Manager
 
 class ChromaManager:
-    def __init__(self, collection_name: str = "default", persist_directory: str = None) -> None:
+    def __init__(self, embedded_model: str = "text-embedding-3-large", collection_name: str = "default", persist_directory: str = None) -> None:
         # 加载环境变量
         load_dotenv()
         api_key = os.getenv('ZETATECHS_API_KEY')
         base_url = os.getenv('ZETATECHS_API_BASE')
 
         # 初始化embeddings
-        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-large", api_key=api_key, base_url=base_url)
+        self.embeddings = OpenAIEmbeddings(model=embedded_model, api_key=api_key, base_url=base_url)
 
         # 如果没有提供persist_directory，则使用默认路径
         if persist_directory is None:
-            current_directory = os.getcwd() # 对应测试文件的路径，而不是"chroma_manager.py"的路径
-            # persist_directory = os.path.join(current_directory, '..', 'ChromaVDB')
+            current_directory = os.getcwd()
             persist_directory = os.path.join(current_directory, 'ChromaVDB') # 在哪个文件中运行，就在该文件夹下建立chroma数据库
 
         # 初始化Chroma向量存储
@@ -47,12 +46,31 @@ class ChromaManager:
         # 初始化文档切分器
         self.splitter = DocumentSplitter()
 
-        # 添加BM25索引
+        # 初始化BM25索引和documents列表
         self.bm25 = None
-        self.documents = []  # 存储文档原文
+        self.documents = []
         
+        # 初始化sparse_retriever
         self.sparse_retriever = BM25Manager()
         
+        # 从现有数据库加载文档内容并初始化索引
+        self._initialize_indices()
+
+    def _initialize_indices(self) -> None:
+        """从Chroma数据库初始化BM25索引和sparse_retriever"""
+        try:
+            # 获取所有文档
+            all_documents = self.vector_store.get() # dict_keys(['ids', 'embeddings', 'documents', 'uris', 'data', 'metadatas', 'included'])
+            if all_documents and len(all_documents['documents']) > 0: # 如果文档存在，并且文档数量大于0
+                # 更新documents列表
+                self.documents = all_documents['documents']
+                # 创建BM25索引
+                self._create_bm25_index(self.documents)
+                # 更新sparse_retriever
+                self.sparse_retriever.add_documents(self.documents)
+        except Exception as e:
+            print(f"初始化索引时出错: {str(e)}")
+
     def _create_bm25_index(self, documents: List[str]) -> None: # 用法请参考：tests\rank_bm25_test.ipynb
         """创建BM25索引"""
         # 对文档进行分词
@@ -79,11 +97,11 @@ class ChromaManager:
         self.vector_store.add_documents(documents=documents_chunks, ids=uuids)
         
         # 更新BM25索引
-        self.documents.extend([doc.page_content for doc in documents_chunks])
+        documents_content = [doc.page_content for doc in documents_chunks]
+        self.documents.extend(documents_content)
         self._create_bm25_index(self.documents)
         
-        # 同时更新BM25索引
-        documents_content = [doc.page_content for doc in documents_chunks]
+        # 更新sparse_retriever
         self.sparse_retriever.add_documents(documents_content)
     
     def upload_txt_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> None:
@@ -104,6 +122,14 @@ class ChromaManager:
         # 生成唯一标识符并添加到向量存储
         uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
         self.vector_store.add_documents(documents=documents_chunks, ids=uuids)
+        
+        # 更新BM25索引
+        documents_content = [doc.page_content for doc in documents_chunks]
+        self.documents.extend(documents_content)
+        self._create_bm25_index(self.documents)
+        
+        # 更新sparse_retriever
+        self.sparse_retriever.add_documents(documents_content)
     
     def upload_directory(self, directory_path: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> None:
         """上传目录中的所有PDF和TXT文件到向量数据库
@@ -123,6 +149,14 @@ class ChromaManager:
         # 生成唯一标识符并添加到向量存储
         uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
         self.vector_store.add_documents(documents=documents_chunks, ids=uuids)
+        
+        # 更新BM25索引
+        documents_content = [doc.page_content for doc in documents_chunks]
+        self.documents.extend(documents_content)
+        self._create_bm25_index(self.documents)
+        
+        # 更新sparse_retriever
+        self.sparse_retriever.add_documents(documents_content)
 
     def similarity_search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
         """执行相似性搜索
@@ -169,26 +203,23 @@ class ChromaManager:
         Returns:
             Chroma向量存储实例
         """
-        return self.vector_store # self使langchain的chroma，这里返回的是本身chroma的实例
+        return self.vector_store # 返回langchain的chroma实例
 
     def hybrid_search(self, query: str, k: int = 3, dense_weight: float = 0.5) -> List[Dict[str, Any]]:
-        """混合搜索方法
+        """混合搜索方法"""
+        if not self.documents:
+            # 尝试重新初始化索引
+            self._initialize_indices()
+            if not self.documents:
+                raise ValueError("未找到任何文档，请先添加文档到向量数据库")
         
-        Args:
-            query: 查询文本
-            k: 返回结果数量
-            dense_weight: 密集向量搜索的权重(0-1)
-            
-        Returns:
-            混合搜索结果列表，包含文档内容、元数据和综合得分
-        """
         # 1. 获取密集向量搜索结果
         dense_results = self.similarity_search_with_score(query, k=k)
         dense_dict = {
-            result[0].page_content: { # result[0]
-                'score': result[1],
-                'metadata': result[0].metadata,
-                'content': result[0].page_content
+            result['content']: {
+                'score': result['score'],
+                'metadata': result['metadata'],
+                'content': result['content']
             }
             for result in dense_results
         }
@@ -211,12 +242,10 @@ class ChromaManager:
             hybrid_score = 0.0
             metadata = {}
             
-            # 如果文档在密集检索结果中
             if doc in dense_dict:
                 hybrid_score += dense_weight * dense_dict[doc]['score']
                 metadata = dense_dict[doc].get('metadata', {})
                 
-            # 如果文档在稀疏检索结果中
             if doc in sparse_dict:
                 hybrid_score += (1 - dense_weight) * sparse_dict[doc]['score']
                 

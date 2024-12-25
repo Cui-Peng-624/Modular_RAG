@@ -43,7 +43,7 @@ class BM25Manager:
         scores = self.bm25.get_scores(tokenized_query)
         
         # 归一化分数
-        normalized_scores = (scores - scores.min()) / (scores.max() - scores.min())
+        normalized_scores = self.normalize_scores(scores)
         
         # 获取top-k结果
         top_k_indices = np.argsort(normalized_scores)[-k:][::-1]
@@ -52,3 +52,10 @@ class BM25Manager:
             'content': self.documents[idx],
             'score': float(normalized_scores[idx])
         } for idx in top_k_indices]
+
+    def normalize_scores(self, scores):
+        score_range = scores.max() - scores.min()
+        if score_range == 0:
+            # 如果所有分数相同，返回全 0 或全 1 的数组 - 虽然全是一样且不为0的可能性不大，但仍然存在，这里暂未考虑
+            return np.zeros_like(scores) if scores.min() == 0 else np.ones_like(scores)
+        return (scores - scores.min()) / score_range

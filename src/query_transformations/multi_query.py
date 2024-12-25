@@ -4,14 +4,13 @@ from langchain.docstore.document import Document # type: ignore
 # 添加项目根目录到sys.path
 from pathlib import Path
 import sys
-project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\tests\..\src
+project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\src\query_transformations\multi_query.py\..\..
 sys.path.append(project_root)
 
 from model_utils.model_manager import ModelManage # type: ignore
-from vdb_managers.pinecone_manager import PineconeManager
 from vdb_managers.chroma_manager import ChromaManager
 
-def validate_query_format(questions: list) -> bool:
+def validate_query_format_multi_query(questions: list) -> bool:
     """验证生成的结果是否符合格式要求 - 每个问题都以数字和句点开头
     
     Args:
@@ -27,7 +26,7 @@ def validate_query_format(questions: list) -> bool:
             return False
     return True
 
-def generate_queries_multi_query(user_prompt: str, num_to_generate: str = "five", model_type: str = "api", model_name: str = "gpt-4o-mini") -> list:
+def generate_queries_multi_query(user_prompt: str, num_to_generate: str = "five", model_type: str = "api", model_name: str = "gpt-4-mini") -> list:
     """生成多个不同视角的查询
     
     Args:
@@ -70,21 +69,22 @@ def generate_queries_multi_query(user_prompt: str, num_to_generate: str = "five"
 
     return result
 
-def retrieve_multi_query(generated_questions: list, top_k: int = 3) -> list:
+def retrieve_multi_query(generated_questions: list, collection_name: str = "default", top_k: int = 3) -> list:
     """利用生成的多个问题检索文档
     
     Args:
         generated_questions: 生成的问题列表
+        collection_name: Chroma集合名称
         top_k: 每个问题返回的结果数量
         
     Returns:
         list: 去重后的检索结果列表
     """
-    pinecone_manager = PineconeManager()
+    chroma_manager = ChromaManager(collection_name=collection_name)
     results = []
     for question in generated_questions:
-        results_with_metadata, results_only_str = pinecone_manager.retrieval(question, top_k=top_k)
-        results.extend(results_only_str)
+        search_results = chroma_manager.similarity_search(question, k=top_k)
+        results.extend([result['content'] for result in search_results])
     return list(set(results))  # 返回唯一的结果
 
 def generate_answer(original_question: str, retrieved_info: list, model_type: str = "api", model_name: str = "gpt-4") -> str:
@@ -93,7 +93,7 @@ def generate_answer(original_question: str, retrieved_info: list, model_type: st
     Args:
         original_question: 用户原始问题
         retrieved_info: 检索到的相关信息列表
-        model_type: 使用的���型类型
+        model_type: 使用的模型类型
         model_name: 使用的模型名称
         
     Returns:
