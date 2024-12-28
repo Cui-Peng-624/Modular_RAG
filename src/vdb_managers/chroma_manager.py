@@ -1,47 +1,56 @@
+# 导入标准库
 import os
+import json
+from typing import List, Dict, Any
+from dotenv import load_dotenv # type: ignore
+
+##########################################################################################################################
+# from langchain_openai import OpenAIEmbeddings # type: ignore
+# from langchain_chroma import Chroma # type: ignore
+import chromadb # type: ignore
+import chromadb.utils.embedding_functions as embedding_functions # type: ignore
+from datetime import datetime
+
+client = chromadb.PersistentClient(path = "ChromaVDB") # 注意，这里不是就在vdb_managers文件夹下创建永久化chroma数据库，而是这个py文件在哪里调用，就在哪里创建永久化chroma数据库，例如我再tests/chroma_manager_test.ipynb中调用，就在tests文件夹下创建永久化chroma数据库
+##########################################################################################################################
+
+from uuid import uuid4
+import numpy as np # type: ignore
+from rank_bm25 import BM25Okapi  # type: ignore
+
 # 设置代理
 os.environ["http_proxy"] = "127.0.0.1:7890"
 os.environ["https_proxy"] = "127.0.0.1:7890"
 
-from typing import List, Dict, Any
-from dotenv import load_dotenv # type: ignore
-from langchain_openai import OpenAIEmbeddings # type: ignore
-from langchain_chroma import Chroma # type: ignore
-from uuid import uuid4
-from rank_bm25 import BM25Okapi # type: ignore # BM25Okapi 是标准的BM25算法，rank_bm25 这个库中也有一些高级算法，例如：BM25L，BM25Plus
-import numpy as np # type: ignore
-
 # 添加项目根目录到sys.path
 from pathlib import Path
 import sys
-project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\tests\..\src
+project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\src\vdb_managers\chroma_manager.py\..\..
 sys.path.append(project_root)
 
+# 导入自定义的模块
 from document_processors.loader import DocumentLoader
 from document_processors.splitter import DocumentSplitter
 from sparse_retrievers.bm25_manager import BM25Manager
+from model_utils.AsyncApiClient import extract_metadata_sync
 
 class ChromaManager:
-    def __init__(self, embedded_model: str = "text-embedding-3-large", collection_name: str = "default", persist_directory: str = None) -> None:
+    METADATA_REGISTRY_PATH = os.path.join(project_root, 'vdb_managers', 'metadata_registry.json')
+
+    def __init__(self, embedded_model: str = "text-embedding-3-large") -> None:
         # 加载环境变量
         load_dotenv()
         api_key = os.getenv('ZETATECHS_API_KEY')
         base_url = os.getenv('ZETATECHS_API_BASE')
 
+        ###########################################################################################################################
         # 初始化embeddings
-        self.embeddings = OpenAIEmbeddings(model=embedded_model, api_key=api_key, base_url=base_url)
-
-        # 如果没有提供persist_directory，则使用默认路径
-        if persist_directory is None:
-            current_directory = os.getcwd()
-            persist_directory = os.path.join(current_directory, 'ChromaVDB') # 在哪个文件中运行，就在该文件夹下建立chroma数据库
-
-        # 初始化Chroma向量存储
-        self.vector_store = Chroma(
-            collection_name=collection_name,
-            embedding_function=self.embeddings,
-            persist_directory=persist_directory,
-        )
+        self.openai_embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+                api_key=api_key,
+                api_base=base_url,
+                model_name=embedded_model
+            )
+        ###########################################################################################################################
         
         # 初始化文档切分器
         self.splitter = DocumentSplitter()
@@ -53,158 +62,147 @@ class ChromaManager:
         # 初始化sparse_retriever
         self.sparse_retriever = BM25Manager()
         
-        # 从现有数据库加载文档内容并初始化索引
-        self._initialize_indices()
+        self._load_metadata_registry()
 
-    def _initialize_indices(self) -> None:
-        """从Chroma数据库初始化BM25索引和sparse_retriever"""
-        try:
-            # 获取所有文档
-            all_documents = self.vector_store.get() # dict_keys(['ids', 'embeddings', 'documents', 'uris', 'data', 'metadatas', 'included'])
-            if all_documents and len(all_documents['documents']) > 0: # 如果文档存在，并且文档数量大于0
-                # 更新documents列表
-                self.documents = all_documents['documents']
-                # 创建BM25索引
-                self._create_bm25_index(self.documents)
-                # 更新sparse_retriever
-                self.sparse_retriever.add_documents(self.documents)
-        except Exception as e:
-            print(f"初始化索引时出错: {str(e)}")
-
-    def _create_bm25_index(self, documents: List[str]) -> None: # 用法请参考：tests\rank_bm25_test.ipynb
-        """创建BM25索引"""
+    def _create_bm25_index(self, documents: List[str]) -> None:
+        """
+        创建BM25索引
+        Args:
+            documents: 文档内容列表
+        """
         # 对文档进行分词
         tokenized_documents = [doc.split() for doc in documents]
         self.bm25 = BM25Okapi(tokenized_documents)
-        
-    def upload_pdf_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> None:
-        """上传PDF文件到向量数据库
-        
-        Args:
-            file_path: PDF文件路径
-            chunk_size: 文档块大小
-            chunk_overlap: 文档块重叠大小
+
+    def _load_metadata_registry(self):
+        """加载或初始化元数据注册表"""
+        if os.path.exists(self.METADATA_REGISTRY_PATH):
+            with open(self.METADATA_REGISTRY_PATH, 'r', encoding='utf-8') as f:
+                self.metadata_registry = json.load(f)
+                # 确保所有值是集合类型
+                for collection, metadata in self.metadata_registry.items():
+                    for key, values in metadata.items():
+                        self.metadata_registry[collection][key] = set(values)
+        else:
+            # 初始化为新的结构：每个 collection 有独立的 metadata 键值对
+            self.metadata_registry = {}
+            self._save_metadata_registry()
+
+    def _save_metadata_registry(self):
+        """保存元数据注册表到文件"""
+        # 将集合转换为列表以便 JSON 序列化
+        serializable_registry = {
+            collection: {key: list(values) for key, values in metadata.items()}
+            for collection, metadata in self.metadata_registry.items()
+        }
+        with open(self.METADATA_REGISTRY_PATH, 'w', encoding='utf-8') as f:
+            json.dump(serializable_registry, f, ensure_ascii=False, indent=4)
+
+    def _update_metadata_registry(self, collection_name: str, metadatas: List[Dict[str, Any]]):
         """
-        # 使用DocumentLoader加载PDF
+        更新元数据注册表
+        Args:
+            collection_name: 集合名称
+            metadatas: 上传文档的元数据列表
+        """
+        if collection_name not in self.metadata_registry:
+            # 如果 collection 不存在，初始化为一个空字典
+            self.metadata_registry[collection_name] = {}
+
+        # 遍历每个 metadata，更新 registry
+        for metadata in metadatas:
+            for key, value in metadata.items():
+                if key not in self.metadata_registry[collection_name]:
+                    # 如果 key 不存在，初始化为一个空集合
+                    self.metadata_registry[collection_name][key] = set()
+                # 将值添加到集合中
+                self.metadata_registry[collection_name][key].add(value)
+
+        self._save_metadata_registry()
+
+    def _get_vector_store(self, collection_name: str, similarity_metric: str, discription: str = None) -> chromadb.Collection:
+        """根据 collection_name 初始化或加载 Chroma 向量存储"""
+        metadata = {
+            "created_at": str(datetime.now())
+        }
+        if discription:  # 如果提供了 discription 参数，则添加到 metadata
+            metadata["discription"] = discription
+
+        if similarity_metric:
+            metadata["hnsw:space"] = similarity_metric
+
+        return client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=self.openai_embedding_function,
+            metadata=metadata
+        )
+
+    def upload_pdf_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100, auto_extract_metadata: bool = True, metadata: Dict[str, Any] = None, collection_name: str = None, similarity_metric: str = 'cosine') -> None:
+        """
+        上传PDF文件到向量数据库并提取元数据
+        auto_extract_metadata：是否使用大模型自动提取每个chunk的特征作为元数据
+        similarity_metric：l2, ip, consine
+        """
+        if collection_name is None:
+            raise ValueError("你必须指定集合名称！")
+
         documents = DocumentLoader.load_pdf(file_path)
-        
-        # 使用DocumentSplitter切分文档
         splitter = DocumentSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        documents_chunks = splitter.split_documents(documents)
+        documents_chunks = splitter.split_documents(documents)  # 1. list: [Document(metadata={'source': 'files/论文 - GraphRAG.pdf', 'page': 0}, page_content=), Document(), ...] # 2. 通过documents_chunks[i].page_content获取chunk内容
         
-        # 生成唯一标识符并添加到向量存储
-        uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
-        self.vector_store.add_documents(documents=documents_chunks, ids=uuids)
+        categories_keywords_dict = {} # {"计算机": {}, "医学": {}, ...} # value是set()
+        metadatas = [] # [{"category": str, "keywords": str}, {}, ...]
         
-        # 更新BM25索引
-        documents_content = [doc.page_content for doc in documents_chunks]
-        self.documents.extend(documents_content)
-        self._create_bm25_index(self.documents)
-        
-        # 更新sparse_retriever
-        self.sparse_retriever.add_documents(documents_content)
-    
-    def upload_txt_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> None:
-        """上传TXT文件到向量数据库
-        
-        Args:
-            file_path: TXT文件路径
-            chunk_size: 文档块大小
-            chunk_overlap: 文档块重叠大小
-        """
-        # 使用DocumentLoader加载TXT
-        documents = DocumentLoader.load_txt(file_path)
-        
-        # 使用DocumentSplitter切分文档
-        splitter = DocumentSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        documents_chunks = splitter.split_documents(documents)
-        
-        # 生成唯一标识符并添加到向量存储
-        uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
-        self.vector_store.add_documents(documents=documents_chunks, ids=uuids)
-        
-        # 更新BM25索引
-        documents_content = [doc.page_content for doc in documents_chunks]
-        self.documents.extend(documents_content)
-        self._create_bm25_index(self.documents)
-        
-        # 更新sparse_retriever
-        self.sparse_retriever.add_documents(documents_content)
-    
-    def upload_directory(self, directory_path: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> None:
-        """上传目录中的所有PDF和TXT文件到向量数据库
-        
-        Args:
-            directory_path: 目录路径
-            chunk_size: 文档块大小
-            chunk_overlap: 文档块重叠大小
-        """
-        # 使用DocumentLoader加载目录中的所有文件
-        documents = DocumentLoader.load_directory(directory_path)
-        
-        # 使用DocumentSplitter切分文档
-        splitter = DocumentSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        documents_chunks = splitter.split_documents(documents)
-        
-        # 生成唯一标识符并添加到向量存储
-        uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
-        self.vector_store.add_documents(documents=documents_chunks, ids=uuids)
-        
-        # 更新BM25索引
-        documents_content = [doc.page_content for doc in documents_chunks]
-        self.documents.extend(documents_content)
-        self._create_bm25_index(self.documents)
-        
-        # 更新sparse_retriever
-        self.sparse_retriever.add_documents(documents_content)
+        if auto_extract_metadata and metadata is None:  # 如果指定要求使用大模型提取元数据，并且没有自己定义metadata
+            extracted_metadata = extract_metadata_sync(file_path, documents_chunks)  # list: [{'category': '***', 'keywords': ['', '', '', '', '']}, {}, ...]
+            for item in extracted_metadata: 
+                category, keywords = item["category"], item["keywords"]
+                if category not in categories_keywords_dict.keys():
+                    categories_keywords_dict[category] = set()
+                categories_keywords_dict[category].update(keywords) 
+                metadatas.append({"category": category, "keywords": keywords[0]})
+        elif metadata is not None:  # 传入的metadata的格式也应该是dict
+            metadatas = [metadata.copy() for _ in range(len(documents_chunks))]
+        else:
+            raise ValueError("auto_extract_metadata = True 时不能指定 metadata！")
 
-    def similarity_search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
-        """执行相似性搜索
-        
-        Args:
-            query: 查询文本
-            k: 返回的结果数量
-            
-        Returns:
-            包含相似文档内容和元数据的字典列表
-        """
-        results = self.vector_store.similarity_search(query, k=k)
-        return [
-            {
-                "content": doc.page_content,
-                "metadata": doc.metadata
-            }
-            for doc in results
-        ]
+        documents = [chunk.page_content for chunk in documents_chunks]
+        uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
 
-    def similarity_search_with_score(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
-        """执行带评分的相似性搜索
-        
-        Args:
-            query: 查询文本
-            k: 返回的结果数量
-            
-        Returns:
-            包含相似文档内容、元数据和相似分的字典列表
-        """
-        results = self.vector_store.similarity_search_with_score(query, k=k)
-        return [
-            {
-                "content": doc.page_content,
-                "metadata": doc.metadata,
-                "score": score
-            }
-            for doc, score in results
-        ]
+        # 初始化对应的 vector_store
+        vector_store = self._get_vector_store(similarity_metric = similarity_metric, collection_name=collection_name)
+
+        # 更新元数据注册表 - 我们需要记录的是什么？是每个collection下面每个chunk的关键字，方便后续当我们需要使用关键字查询的时候进行匹配
+        self._update_metadata_registry(collection_name, metadatas) # (str, list(dict))
+
+        for metadata, documents_chunk in zip(metadatas, documents_chunks):
+            metadata["source"] = documents_chunk.metadata.get("source", None)
+            metadata["page"] = documents_chunk.metadata.get("page", None)
+
+
+        vector_store.add(documents=documents, metadatas=metadatas, ids=uuids)
+
+        # 更新 BM25 索引和文档内容
+        self.documents.extend(documents)
+        self._create_bm25_index(self.documents)
+        self.sparse_retriever.add_documents(documents)
+
+    def upload_txt_file() -> None:
+        """上传TXT文件到向量数据库并提取元数据"""
+        pass
+
+    def upload_directory() -> None:
+        """上传目录中的所有PDF和TXT文件到向量数据库并提取元数据"""
+        pass
+
+    def dense_search(self, collection_name: str, query: str, k: int = 3, similarity_metric: str = 'cosine') -> List[Dict[str, Any]]:
+        vector_store = self._get_vector_store(collection_name=collection_name, similarity_metric = similarity_metric)
+        results = vector_store.query(
+            query_texts = [query],
+            n_results = k,
+        )
+        return results
     
-    def get_vector_store(self):
-        """返回vector_store实例
-        
-        Returns:
-            Chroma向量存储实例
-        """
-        return self.vector_store # 返回langchain的chroma实例
-
     def hybrid_search(self, query: str, k: int = 3, dense_weight: float = 0.5) -> List[Dict[str, Any]]:
         """混合搜索方法"""
         if not self.documents:
@@ -261,46 +259,53 @@ class ChromaManager:
         hybrid_results.sort(key=lambda x: x['score'], reverse=True)
         return hybrid_results[:k]
 
-    # 综合了上述的三种搜索模式，返回list[str]
-    def search(self, query: str, mode: str = "hybrid", k: int = 3, **kwargs) -> list[str]:
+    # 综合了上述的两种搜索模式，返回list[str]
+    def search(self, query: str, mode: str = "hybrid", k: int = 3, metadata_filter: Dict[str, Any] = None, **kwargs) -> list[str]:
         """
-        根据指定的搜索模式获取检索结果并返回内容列表
-        
+        根据指定的搜索模式和元数据过滤获取检索结果并返回内容列表
+
         Args:
             query: 查询文本
-            mode: 搜索模式，可选值为 "hybrid", "similarity", "similarity_with_score"
+            mode: 搜索模式，可选值为 "hybrid", "dense"
             k: 返回的结果数量
-            **kwargs: 其他参数，比如hybrid_search的dense_weight
-            
+            metadata_filter: 元数据过滤条件，格式参考 Chroma 的 metadata filtering 文档
+            **kwargs: 其他参数，比如 hybrid_search 的 dense_weight
+
         Returns:
             list[str]: 检索到的文档内容列表
-            
+
         Raises:
-            ValueError: 当指定的mode不支持时抛出异常
+            ValueError: 当指定的 mode 不支持时抛出异常
         """
-        # 验证搜索模式
-        valid_modes = ["hybrid", "similarity", "similarity_with_score"]
+        valid_modes = ["hybrid", "dense"]
         if mode not in valid_modes:
             raise ValueError(f"不支持的搜索模式: {mode}。支持的模式包括: {', '.join(valid_modes)}")
-        
+
+        # 判断是否需要根据元数据过滤搜索
+        collection_name = None
+        if metadata_filter:
+            # 假设元数据过滤包含 'category' 字段
+            collection_name = metadata_filter.get("category", None)
+
+        if collection_name:
+            vector_store = self._get_vector_store(collection_name=collection_name)
+        else:
+            vector_store = self._get_vector_store(collection_name="default")
+
         # 根据不同模式获取搜索结果
         if mode == "hybrid":
             dense_weight = kwargs.get("dense_weight", 0.5)
             results = self.hybrid_search(query, k=k, dense_weight=dense_weight)
             contents = [result["content"] for result in results]
-            
-        elif mode == "similarity":
-            results = self.similarity_search(query, k=k)
+
+        elif mode == "dense":
+            results = self.dense_search(query, k=k)
             contents = [result["content"] for result in results]
-            
-        else:  # similarity_with_score
-            results = self.similarity_search_with_score(query, k=k)
-            contents = [result["content"] for result in results]
-        
+
         return contents
 
-    # 获取格式化的上下文字符串。此函数会先调用get_combined_contents获取内容列表，
-    # 然后将其转换为格式化的字符串。
+    # 获取格式化的上下文字符串。此函数会先调用search获取内容列表，
+    # 然后将其转换为格式化的字符串（就是拼接在一起）。
     def get_formatted_context(self, query: str, mode: str = "hybrid", k: int = 3, **kwargs) -> str:
         """
         获取格式化的上下文字符串。此函数会先调用get_combined_contents获取内容列表，
@@ -324,7 +329,7 @@ class ChromaManager:
             # 清理文本（移除多余的空白字符）
             cleaned_content = " ".join(content.split())
             # 添加编号和格式化
-            formatted_chunk = f"[文档片段 {i}]\n{cleaned_content}"
+            formatted_chunk = f"[���档片段 {i}]\n{cleaned_content}"
             formatted_chunks.append(formatted_chunk)
         
         # 使用分隔线连接所有文档片段

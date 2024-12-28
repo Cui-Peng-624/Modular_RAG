@@ -7,7 +7,7 @@ project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\src\query_t
 sys.path.append(project_root)
 
 from model_utils.model_manage import ModelManage # type: ignore
-from vdb_managers.chroma_manager import ChromaManager
+from vdb_managers.drop.chroma_manager_1 import ChromaManager
 
 class SearchQueriesGenerator(BaseModel):
     user_request: str
@@ -92,7 +92,7 @@ Use the above context and any background question + answer pairs to answer the q
 
 def generate_final_prompt_decomposition_recursively(user_prompt: str, model_type: str = "api", model_name: str = "gpt-4o-mini", mode: str = "hybrid", **kwargs) -> str:
     """
-    mode：["hybrid", "similarity", "similarity_with_score"]
+    mode：["hybrid", "dense"]
     kwargs: 其他参数，比如dense_weight
     """
     q_a_pairs = ""
@@ -101,15 +101,12 @@ def generate_final_prompt_decomposition_recursively(user_prompt: str, model_type
     sub_questions = generate_queries_decomposition_with_structured_output(user_prompt)
     for sub_question in sub_questions:
 
-        sub_question_docs = chroma.search(sub_question, mode = mode, **kwargs) # list[str]
+        sub_question_docs = chroma.search(sub_question, mode = mode, **kwargs) # 返回list[str]
 
         sub_question_answer = model.generate_with_context(sub_question, sub_question_docs)
         q_a_pairs += f"Question: {sub_question}\nAnswer: {sub_question_answer}\n\n"
     
-    if mode == "dense":
-        context = chroma.get_formatted_context(user_prompt) # 默认是混合搜索模式
-    elif mode == "hybrid":
-        context = chroma.get_formatted_context(user_prompt)
+    context = chroma.get_formatted_context(user_prompt, mode = mode)
 
     final_prompt = template_recursively.format(question=user_prompt, q_a_pairs=q_a_pairs, context=context)
     return final_prompt

@@ -1,5 +1,5 @@
 import numpy as np # type: ignore
-from rank_bm25 import BM25Okapi # type: ignore
+from rank_bm25 import BM25Okapi # type: ignore # BM25Okapi 是标准的BM25算法，rank_bm25 这个库中也有一些高级算法，例如：BM25L，BM25Plus
 from typing import List, Dict, Any
 
 class BM25Manager:

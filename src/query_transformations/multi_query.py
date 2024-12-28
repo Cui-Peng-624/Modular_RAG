@@ -1,6 +1,3 @@
-from typing import List
-from langchain.docstore.document import Document # type: ignore
-
 # 添加项目根目录到sys.path
 from pathlib import Path
 import sys
@@ -8,9 +5,9 @@ project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\src\query_t
 sys.path.append(project_root)
 
 from model_utils.model_manage import ModelManage # type: ignore
-from vdb_managers.chroma_manager import ChromaManager
+from vdb_managers.drop.chroma_manager_1 import ChromaManager
 
-def validate_query_format_multi_query(questions: list) -> bool:
+def validate_format_multi_query(questions: list) -> bool:
     """验证生成的结果是否符合格式要求 - 每个问题都以数字和句点开头
     
     Args:
@@ -60,7 +57,7 @@ def generate_queries_multi_query(user_prompt: str, num_to_generate: str = "five"
     result_with_numbers = [item.strip() for item in response.split("\n") if item.strip()]
     
     # 验证格式（包括编号）
-    if not validate_query_format_multi_query(result_with_numbers):
+    if not validate_format_multi_query(result_with_numbers):
         print("Generated questions do not meet the required format!")
         return result_with_numbers
     

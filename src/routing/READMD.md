@@ -1,5 +1,13 @@
 对应“rag_from_scratch_10_and_11”
 
+# 自己的理解
+
+### 1. Logical and Semantic routing 
+json mode让大模型选择使用哪个vdb，具体来说可能是向量数据库和知识图谱，或者比如，chroma中不同name的数据库
+
+### 2. Semantic routing
+有自定义的prompt，让大模型根据输入选择合适的预先定义好的prompt
+
 # Claude
 
 Routing（路由）在 RAG 系统中是一种智能分发和选择策略，用于决定如何处理不同类型的查询或选择最适合的检索/生成路径。这是一种优化 RAG 性能的重要方法。
