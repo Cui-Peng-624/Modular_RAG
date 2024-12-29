@@ -28,6 +28,7 @@ from document_processors.loader import DocumentLoader
 from document_processors.splitter import DocumentSplitter
 from sparse_retrievers.bm25_manager import BM25Manager
 from model_utils.AsyncApiClient import extract_metadata_sync
+from vdb_managers.fuzzy_metadata_filter import apply_fuzzy_metadata_filter
 
 class ChromaManager:
     METADATA_REGISTRY_PATH = os.path.join(project_root, 'vdb_managers', 'metadata_registry.json')
@@ -184,16 +185,25 @@ class ChromaManager:
         """上传目录中的所有PDF和TXT文件到向量数据库并提取元数据"""
         pass
 
-    def dense_search(self, collection_name: str, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    def dense_search(self, collection_name: str, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None, fuzzy_filter: bool = False) -> List[Dict[str, Any]]:
         """
         metadata_filter example:
             metadata_filter = {'author': {'$in': ['john', 'jill']}}
+        fuzzy_filter: 是否启用模糊元数据过滤
         """
+        # 加载向量数据库
         vector_store = self._get_vector_store(collection_name=collection_name)
+
+        # 如果启用了模糊元数据过滤
+        if fuzzy_filter and metadata_filter: # 如果启用了模糊元数据过滤，并且传入了metadata_filter
+            metadata_filter = apply_fuzzy_metadata_filter(collection_name, metadata_filter)
+            # print("模糊元数据过滤后的过滤器：", metadata_filter, "\n")
+
+        # 执行密集搜索
         results = vector_store.query(
-            query_texts = [query],
-            where = metadata_filter,
-            n_results = k,
+            query_texts=[query],
+            where=metadata_filter,
+            n_results=k,
         )
         return results
     
@@ -211,13 +221,18 @@ class ChromaManager:
             return results["metadatas"][0][0]  # 返回第一个匹配的 metadata
         return {}
 
-    def hybrid_search(self, collection_name: str, query: str, k: int = 3, dense_weight: float = 0.5, metadata_filter: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """混合搜索方法，支持元数据过滤"""
+    def hybrid_search(self, collection_name: str, query: str, k: int = 3, dense_weight: float = 0.5, metadata_filter: Dict[str, Any] = None, fuzzy_filter: bool = False) -> List[Dict[str, Any]]:
+        """混合搜索方法，支持元数据过滤，支持模糊元数据过滤"""
         # 加载稀疏索引
         self.sparse_retriever.load_collection(collection_name)
 
+        # 如果启用了模糊元数据过滤
+        if fuzzy_filter and metadata_filter:
+            metadata_filter = apply_fuzzy_metadata_filter(collection_name, metadata_filter)
+            # print("模糊元数据过滤后的过滤器：", metadata_filter, "\n")
+
         # 1. 获取密集向量搜索结果
-        dense_results = self.dense_search(collection_name, query, k=k)
+        dense_results = self.dense_search(collection_name = collection_name, query = query, k=k, metadata_filter=metadata_filter, fuzzy_filter=fuzzy_filter)
         dense_documents = dense_results.get('documents', [])[0]  # [[]]，[0]代表返回[]
         dense_metadatas = dense_results.get('metadatas', [])[0]
         dense_distances = dense_results.get('distances', [])[0]
@@ -282,7 +297,7 @@ class ChromaManager:
         return sorted(hybrid_results, key=lambda x: x['score'], reverse=True)[:k]
 
     # 综合了上述的两种搜索模式，根据dense_weight的大小选择不同的搜索方式，返回list[str]
-    def search(self, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None, dense_weight: float = 0.5, collection_name: str = None, **kwargs) -> list[dict]:
+    def search(self, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None, dense_weight: float = 0.5, collection_name: str = None, fuzzy_filter: bool = False, **kwargs) -> list[dict]:
         """
         根据指定的搜索模式和元数据过滤获取检索结果并返回内容列表
 
@@ -292,6 +307,7 @@ class ChromaManager:
             metadata_filter: 元数据过滤条件，格式参考 Chroma 的 metadata filtering 文档
             dense_weight: 混合搜索模式中的密集搜索权重，默认值为 0.5，注意，此参数还可以用于表示单独的系数搜索和混合搜索
             collection_name: 集合名称
+            fuzzy_filter: 是否启用模糊元数据过滤
             **kwargs:
 
         Returns:
@@ -315,14 +331,15 @@ class ChromaManager:
             query=query,
             k=k,
             dense_weight=dense_weight,
-            metadata_filter=metadata_filter
+            metadata_filter=metadata_filter,
+            fuzzy_filter=fuzzy_filter
         )
 
         return results
 
     # 获取格式化的上下文字符串。此函数会先调用search获取内容列表，
     # 然后将其转换为格式化的字符串（就是拼接在一起）。
-    def get_formatted_context(self, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None, dense_weight: float = 0.5, collection_name: str = None, **kwargs) -> str:
+    def get_formatted_context(self, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None, dense_weight: float = 0.5, collection_name: str = None, fuzzy_filter: bool = False, **kwargs) -> str:
         """
         获取格式化的上下文字符串。此函数会先调用search获取内容列表，
         然后将其转换为格式化的字符串。
@@ -334,6 +351,7 @@ class ChromaManager:
             metadata_filter: 元数据过滤条件
             dense_weight: 混合搜索模式中的密集搜索权重，默认值为 0.5
             collection_name: 集合名称
+            fuzzy_filter: 是否启用模糊元数据过滤
             **kwargs: 其他参数，比如 hybrid_search 的额外参数
             
         Returns:
@@ -346,6 +364,7 @@ class ChromaManager:
             metadata_filter=metadata_filter,
             dense_weight=dense_weight,
             collection_name=collection_name,
+            fuzzy_filter=fuzzy_filter,
             **kwargs
         )
         
