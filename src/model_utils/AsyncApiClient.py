@@ -23,8 +23,8 @@ class AsyncAPIClient:
         self.client = AsyncOpenAI(api_key=os.getenv('ZETATECHS_API_KEY'), base_url=os.getenv('ZETATECHS_API_BASE'))  # AsyncOpenAI 专门用于异步
         # 限制并发请求数，避免触发API限制
         self.semaphore = asyncio.Semaphore(10)  # 同时最多10个请求
-        self.max_retries = 1  # 设置最大重试次数
-        self.retry_delay = 1  # 每次重试的延迟时间（秒）
+        self.max_retries = 3  # 设置最大重试次数
+        self.retry_delay = 2  # 每次重试的延迟时间（秒）
 
     async def generate_response(self, prompt: str, response_format: Dict[str, Any]) -> str:
         """发送单个请求到OpenAI API，带重试机制，返回 JSON 字符串"""
@@ -116,7 +116,7 @@ async def extract_metadata(file_path: str, documents_chunks: List[Any]) -> Dict[
     prompts = []
     for chunk in documents_chunks:
         prompt = f"""
-        请分析以下文本内容，并提取该文本所属的类别（如计算机、医学等）和关键字（不超过3个）。
+        请分析以下文本内容，并提取该文本所属的类别（如计算机、医学等）和关键字（不超过2个）。
         返回格式为JSON，包含两个字段：category（类别）和 keywords（关键字列表）。
 
         文本内容：

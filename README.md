@@ -18,3 +18,6 @@
 - step back 和 HyDE 实现
 - 由langchain_chroma换成chroma
 - 实现元数据upload和自动提取元数据
+
+2024-12-29
+- 进一步完善向量数据库管理的类
