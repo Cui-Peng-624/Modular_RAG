@@ -1,5 +1,6 @@
 from typing import List
 from langchain.text_splitter import RecursiveCharacterTextSplitter # type: ignore
+# 除了这个chunking方法，还有其他一些chunking的方法可以进一步探索
 from langchain.docstore.document import Document # type: ignore
 
 class DocumentSplitter:

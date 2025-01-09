@@ -8,14 +8,13 @@ import chromadb.utils.embedding_functions as embedding_functions # type: ignore
 from datetime import datetime
 from uuid import uuid4
 import numpy as np # type: ignore
-from rank_bm25 import BM25Okapi  # type: ignore
 
 # 设置代理
 os.environ["http_proxy"] = "127.0.0.1:7890"
 os.environ["https_proxy"] = "127.0.0.1:7890"
 
 # 设置client
-client = chromadb.PersistentClient(path = "ChromaVDB") # 注意，这里不是就在vdb_managers文件夹下创建永久化chroma数据库，而是这个py文件在哪里调用，就在哪里创建永久化chroma数据库，例如我再tests/chroma_manager_test.ipynb中调用，就在tests文件夹下创建永久化chroma数据库
+client = chromadb.PersistentClient(path = "ChromaVDB") # 注意，这里不是就在vdb_managers文件夹下创建永久化chroma数据库，而是这个py文件在哪里调用，就在哪里创建永久化chroma数据库，例如我再tests/chroma_manager_test.ipynb中调用，就在tests文件夹下创建永久化chroma数据库 - 就是在调用这个文件的文件目录下寻找ChromaVDB文件夹，其中就是我们的向量数据库
 
 # 添加项目根目录到sys.path
 from pathlib import Path
@@ -27,8 +26,9 @@ sys.path.append(project_root)
 from document_processors.loader import DocumentLoader
 from document_processors.splitter import DocumentSplitter
 from sparse_retrievers.bm25_manager import BM25Manager
-from model_utils.AsyncApiClient import extract_metadata_sync
+from model_utils.extract_metadata_sync import extract_metadata_sync
 from vdb_managers.fuzzy_metadata_filter import apply_fuzzy_metadata_filter
+from indexing.extract_summaries_sync import extract_summaries_sync
 
 class ChromaManager:
     METADATA_REGISTRY_PATH = os.path.join(project_root, 'vdb_managers', 'metadata_registry.json')
@@ -117,28 +117,22 @@ class ChromaManager:
             metadata=metadata
         )
     
-    # 这个好像废弃了
-    # def _initialize_indices(self):
-    #     """
-    #     初始化文档和索引
-    #     """
-    #     # 假设文档存储在某个持久化存储中（如数据库或文件）
-    #     # 这里需要根据实际情况加载文档
-    #     if not hasattr(self, "vector_store"): # 检查实例中是否有vector_store属性
-    #         raise ValueError("未找到向量存储，请先初始化或上传文档。")
-
-    #     # 从 vector_store 中加载所有文档
-    #     all_documents = self.vector_store.get_all_documents()  # 假设有此方法
-    #     self.documents = [doc["content"] for doc in all_documents]
-
-    #     # 初始化 BM25 索引
-    #     self._create_bm25_index(self.documents)
-
-    def upload_pdf_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100, auto_extract_metadata: bool = True, metadata: Dict[str, Any] = None, collection_name: str = None, discription: str = None, similarity_metric: str = 'cosine') -> None:
+    def upload_pdf_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100, 
+                       auto_extract_metadata: bool = False, metadata: Dict[str, Any] = None, 
+                       collection_name: str = None, discription: str = None, 
+                       summarize_chunks: bool = False, similarity_metric: str = 'cosine') -> None:
         """
-        上传PDF文件到向量数据库并提取元数据
-        auto_extract_metadata：是否使用大模型自动提取每个chunk的特征作为元数据
-        similarity_metric：l2, ip, consine
+        上传PDF文件到向量数据库
+        Args:
+            file_path: 文件路径
+            chunk_size: 每个chunk的最大字符数
+            chunk_overlap: 相邻chunk之间的重叠字符数
+            auto_extract_metadata：是否使用大模型自动提取每个chunk的特征作为元数据
+            metadata: 传入的metadata，如果auto_extract_metadata为False，则使用传入的metadata
+            collection_name: 集合名称
+            discription: 集合描述
+            summarize_chunks: 是否对chunks进行总结
+            similarity_metric：l2, ip, consine
         """
         if collection_name is None:
             raise ValueError("你在上传文件的时候必须指定集合名称！")
@@ -162,8 +156,23 @@ class ChromaManager:
         documents = [chunk.page_content for chunk in documents_chunks]
         uuids = [str(uuid4()) for _ in range(len(documents_chunks))]
 
+        #####################################################################################
+        if summarize_chunks:
+            # 使用LLM对每个chunk进行总结
+            summaries = extract_summaries_sync(documents)  # 异步获取总结
+            
+            # 将原始文档存入metadata，总结作为document
+            for i, metadata in enumerate(metadatas):
+                metadata["original_text"] = documents[i]  # 原始文档存入metadata
+            
+            # 使用总结作为document
+            documents = summaries
+        #####################################################################################
+
         # 初始化对应的 vector_store
-        vector_store = self._get_vector_store(collection_name=collection_name, discription=discription, similarity_metric = similarity_metric)
+        vector_store = self._get_vector_store(collection_name=collection_name, 
+                                            discription=discription, 
+                                            similarity_metric=similarity_metric)
 
         # 更新元数据注册表 - 我们需要记录的是什么？是每个collection下面每个chunk的关键字，方便后续当我们需要使用关键字查询的时候进行匹配
         self._update_metadata_registry(collection_name, metadatas) # (str, list(dict))
@@ -185,11 +194,19 @@ class ChromaManager:
         """上传目录中的所有PDF和TXT文件到向量数据库并提取元数据"""
         pass
 
-    def dense_search(self, collection_name: str, query: str, k: int = 3, metadata_filter: Dict[str, Any] = None, fuzzy_filter: bool = False) -> List[Dict[str, Any]]:
+    def dense_search(self, collection_name: str, query: str, k: int = 3, 
+                    metadata_filter: Dict[str, Any] = None, fuzzy_filter: bool = False,
+                    use_summary: bool = False) -> List[Dict[str, Any]]:
         """
-        metadata_filter example:
-            metadata_filter = {'author': {'$in': ['john', 'jill']}}
-        fuzzy_filter: 是否启用模糊元数据过滤
+        密集向量搜索
+        Args:
+            collection_name: 集合名称
+            query: 查询文本
+            k: 返回结果数量
+            metadata_filter: 元数据过滤条件
+                metadata_filter example: metadata_filter = {'author': {'$in': ['john', 'jill']}}
+            fuzzy_filter: 是否启用模糊元数据过滤
+            use_summary: 是否返回总结内容。True返回总结，False返回原文
         """
         # 加载向量数据库
         vector_store = self._get_vector_store(collection_name=collection_name)
@@ -199,12 +216,22 @@ class ChromaManager:
             metadata_filter = apply_fuzzy_metadata_filter(collection_name, metadata_filter)
             # print("模糊元数据过滤后的过滤器：", metadata_filter, "\n")
 
-        # 执行密集搜索
+        # 获取检索结果
         results = vector_store.query(
             query_texts=[query],
             where=metadata_filter,
             n_results=k,
+            include=["metadatas", "documents", "distances"]
         )
+
+        # 如果不使用summary（即需要原始文档），则从metadata中获取原始文档
+        if not use_summary and results["metadatas"]: # 如果use_summary为False，并且检索结果中存在metadata
+            for i, metadata in enumerate(results["metadatas"][0]):
+                if "original_text" in metadata:
+                    results["documents"][0][i] = metadata["original_text"]
+                else: # 存在一类情况，upload的时候有时候不需要summary，但检索的时候一起检索，所以可能会有的chunk的metadata有original_text，有的没有，所以需要边缘处理
+                    results["documents"][0][i] = results["documents"][0][i]
+
         return results
     
     def _get_metadata_from_vector_store(self, collection_name: str, document: str) -> Dict[str, Any]:
