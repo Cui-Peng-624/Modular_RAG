@@ -8,10 +8,7 @@ import chromadb.utils.embedding_functions as embedding_functions # type: ignore
 from datetime import datetime
 from uuid import uuid4
 import numpy as np # type: ignore
-<<<<<<< HEAD
 from ragatouille import RAGPretrainedModel # type: ignore
-=======
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
 
 # 设置代理
 os.environ["http_proxy"] = "127.0.0.1:7897"
@@ -121,21 +118,12 @@ class ChromaManager:
             metadata=metadata
         )
     
-<<<<<<< HEAD
+
     def _upload_documents(self, documents_type: str, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100, auto_extract_metadata: bool = False, metadata: Dict[str, Any] = None, collection_name: str = None, discription: str = None, summarize_chunks: bool = False, similarity_metric: str = 'cosine'):
         """
         上传文件到向量数据库
         Args:
             documents_type: 文档类型，可以是"pdf"或"txt"或"directory"
-=======
-    def upload_pdf_file(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100, 
-                       auto_extract_metadata: bool = False, metadata: Dict[str, Any] = None, 
-                       collection_name: str = None, discription: str = None, 
-                       summarize_chunks: bool = False, similarity_metric: str = 'cosine') -> None:
-        """
-        上传PDF文件到向量数据库
-        Args:
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
             file_path: 文件路径
             chunk_size: 每个chunk的最大字符数
             chunk_overlap: 相邻chunk之间的重叠字符数
@@ -198,16 +186,8 @@ class ChromaManager:
 
         # 初始化对应的 vector_store
         vector_store = self._get_vector_store(collection_name=collection_name, 
-<<<<<<< HEAD
                                               discription=discription, 
                                               similarity_metric=similarity_metric)
-=======
-                                            discription=discription, 
-                                            similarity_metric=similarity_metric)
-
-        # 更新元数据注册表 - 我们需要记录的是什么？是每个collection下面每个chunk的关键字，方便后续当我们需要使用关键字查询的时候进行匹配
-        self._update_metadata_registry(collection_name, metadatas) # (str, list(dict))
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
 
         # 将原始文档信息存入metadata
         for metadata, documents_chunk in zip(metadatas, documents_chunks):
@@ -311,19 +291,15 @@ class ChromaManager:
 
     def dense_search(self, collection_name: str, query: str, k: int = 3, 
                     metadata_filter: Dict[str, Any] = None, fuzzy_filter: bool = False,
-<<<<<<< HEAD
                     use_summary: bool = False, 
                     colbert_rerank: bool = False, colbert_index_name: str = None, colbert_max_document_length: int = None, colbert_split_documents: bool = True, colbert_k: int = 1) -> List[Dict[str, Any]]:
-=======
-                    use_summary: bool = False) -> List[Dict[str, Any]]:
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
+
         """
         密集向量搜索
         Args:
             collection_name: 集合名称
             query: 查询文本
             k: 返回结果数量
-<<<<<<< HEAD
             metadata_filter: 元数据过滤条件。metadata_filter example: metadata_filter = {'author': {'$in': ['john', 'jill']}}
             fuzzy_filter: 是否启用模糊元数据过滤
             use_summary: 是否返回总结内容。True返回总结，False返回原文。一般只有在upload的时候指定了需要使用summary，所以dense_search中我们认为用户仅会在upload时使用了summary这里才会考虑返回的是summary还是original chunks。
@@ -336,12 +312,6 @@ class ChromaManager:
             colbert_max_document_length: ColBERT的每个chunk的最大字符数
             colbert_split_documents: 是否对文档进行切分
             colbert_k: ColBERT的返回结果数量
-=======
-            metadata_filter: 元数据过滤条件
-                metadata_filter example: metadata_filter = {'author': {'$in': ['john', 'jill']}}
-            fuzzy_filter: 是否启用模糊元数据过滤
-            use_summary: 是否返回总结内容。True返回总结，False返回原文
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
         """
         # 加载向量数据库
         vector_store = self._get_vector_store(collection_name=collection_name)
@@ -362,7 +332,6 @@ class ChromaManager:
         # 如果不使用summary（即需要原始文档），则从metadata中获取原始文档
         if not use_summary and results["metadatas"]: # 如果use_summary为False，并且检索结果中存在metadata
             for i, metadata in enumerate(results["metadatas"][0]):
-<<<<<<< HEAD
                 if "original_text" in metadata.keys(): # 交换一下
                     temp = metadata["original_text"]
                     metadata["summarized_text"] = results["documents"][0][i]
@@ -397,12 +366,6 @@ class ChromaManager:
             }
     
             results = formatted_results
-=======
-                if "original_text" in metadata:
-                    results["documents"][0][i] = metadata["original_text"]
-                else: # 存在一类情况，upload的时候有时候不需要summary，但检索的时候一起检索，所以可能会有的chunk的metadata有original_text，有的没有，所以需要边缘处理
-                    results["documents"][0][i] = results["documents"][0][i]
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
 
         return results
     

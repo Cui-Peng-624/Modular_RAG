@@ -82,7 +82,6 @@ class AsyncAPIClient:
             tasks.append(task)
 
         results = []
-<<<<<<< HEAD
         for task in asyncio.as_completed(tasks):
             try:
                 result = await task
@@ -94,11 +93,4 @@ class AsyncAPIClient:
                 print(f"任务执行失败: {e}")
                 results.append(None)
 
-=======
-        for prompt in prompts:
-            result_str = await self.generate_response(prompt, response_format)
-            # 将 JSON 字符串解析为字典
-            result_dict = json.loads(result_str)
-            results.append(result_dict)
->>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
         return results
