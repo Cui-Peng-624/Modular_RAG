@@ -1,6 +1,6 @@
 import os
-os.environ["http_proxy"]="127.0.0.1:7890"
-os.environ["https_proxy"]="127.0.0.1:7890"
+os.environ["http_proxy"]="127.0.0.1:7897"
+os.environ["https_proxy"]="127.0.0.1:7897"
 
 # config.py
 from dotenv import load_dotenv # type: ignore

@@ -1,4 +1,4 @@
 .env
-pictures/
-rag_from_scratch/
-refactor/
+droped/
+langchain_courses/
+src\indexing\test_raptor_integration.ipynb

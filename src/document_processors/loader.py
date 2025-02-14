@@ -52,3 +52,22 @@ class DocumentLoader:
         
         # 合并所有文档
         return txt_documents + pdf_documents
+    
+    @staticmethod
+    def load_documents(documents_type: str, directory_path: str) -> List[Document]:
+        """
+        加载指定类型的文档
+        
+        Args:
+            documents_type: 文档类型，可以是"pdf"或"txt"或"directory"
+            directory_path: 文档所在的目录路径
+            
+        """
+        if documents_type == "pdf":
+            return DocumentLoader.load_pdf(directory_path)
+        elif documents_type == "txt":
+            return DocumentLoader.load_txt(directory_path)
+        elif documents_type == "directory":
+            return DocumentLoader.load_directory(directory_path)
+        else:
+            raise ValueError(f"不支持的文件类型: {documents_type}")

@@ -1,6 +1,6 @@
 import os
-os.environ["http_proxy"]="127.0.0.1:7890"
-os.environ["https_proxy"]="127.0.0.1:7890"
+os.environ["http_proxy"]="http://127.0.0.1:7897"
+os.environ["https_proxy"]="http://127.0.0.1:7897"
 
 # config.py
 from dotenv import load_dotenv # type: ignore
@@ -15,8 +15,6 @@ from typing import List, Dict, Any
 from openai import OpenAI # type: ignore
 # from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline # type: ignore
 # import torch # type: ignore
-
-
 
 class ModelManage:
     def __init__(self, model_type: str = "api", model_name: str = "gpt-4o-mini"): # 默认使用api模型
@@ -48,7 +46,7 @@ class ModelManage:
         #         raise ValueError(f"Unsupported model type: {self.model_type}. We only support 'gemma-2-9b' in this task.")
 
     # 支持正常模式和结构化输出（json mode）模式
-    def generate(self, user_prompt: str, mode: str = "normal", model_name: str = "gpt-4o-mini-2024-07-18", **kwargs) -> str:
+    def generate(self, user_prompt: str, mode: str = "normal", model_name: str = "gpt-4o-2024-08-06", **kwargs) -> str:
         """
         该generate函数用于生成任意回答，仅需要输入user_prompt即可。
         

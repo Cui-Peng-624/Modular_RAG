@@ -40,7 +40,7 @@ class BM25Manager:
         if collection_name not in self.collections.keys():
             self.collections[collection_name] = []
         self.collections[collection_name].extend(documents)
-        self.collections[collection_name] = list(set(self.collections[collection_name]))  # 去重
+        self.collections[collection_name] = list(set(self.collections[collection_name]))  # 去重。set是无序的，所以转会list可能会导致顺序改变，不用担心。
         self._save_collections()
 
         # 更新内存中的BM25索引 - 这里似乎没有必要，因为如果我们想调用稀疏搜索，必然会调用load_collection，load_collection中也会_create_bm25_index，但我们仍然不删除，因为更新一下也没坏处

@@ -1,5 +1,6 @@
 from typing import List
 from langchain.text_splitter import RecursiveCharacterTextSplitter # type: ignore
+# 除了这个chunking方法，还有其他一些chunking的方法可以进一步探索
 from langchain.docstore.document import Document # type: ignore
 
 class DocumentSplitter:
@@ -18,7 +19,8 @@ class DocumentSplitter:
         )
     
     def split_documents(self, documents: List[Document]) -> List[Document]:
-        """将文档列表切分成更小的块
+        """
+        将文档列表切分成更小的块
         
         Args:
             documents: 要切分的Document对象列表
@@ -28,8 +30,9 @@ class DocumentSplitter:
         """
         return self.splitter.split_documents(documents)
     
-    def split_text(self, text: str) -> List[Document]:
-        """将单个文本字符串切分成多个文档块
+    def split_text(self, text: str) -> List[Document]: # 这个函数是针对用户用键盘输入的str
+        """
+        将单个文本字符串切分成多个文档块
         
         Args:
             text: 要切分的文本字符串

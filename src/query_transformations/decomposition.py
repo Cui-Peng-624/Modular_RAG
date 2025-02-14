@@ -17,7 +17,7 @@ def generate_queries_decomposition_with_structured_output(
     user_prompt: str, 
     num_to_generate: int = 5, 
     model_type: str = "api", 
-    model_name: str = "gpt-4o-mini-2024-07-18"
+    model_name: str = "gpt-4o-2024-08-06"
 ) -> list:
     """使用OpenAI的JSON模式输出将复杂问题分解为多个子问题
     
@@ -73,7 +73,10 @@ def generate_queries_decomposition_with_structured_output(
     except Exception as e:
         print(f"Error parsing response: {e}")
         return []
-    
+
+# 以下代码均是模板，而非可以独立运行的代码 ！！！
+# 以下代码均是模板，而非可以独立运行的代码 ！！！
+# 以下代码均是模板，而非可以独立运行的代码 ！！！
 ############################## Answer recursively ##############################
 template_recursively = """Here is the question you need to answer:
 

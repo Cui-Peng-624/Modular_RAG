@@ -5,7 +5,7 @@ project_root = str(Path(__file__).parent.parent.absolute()) # e:\RAG\src\query_t
 sys.path.append(project_root)
 
 from model_utils.model_manage import ModelManage # type: ignore
-from vdb_managers.drop.chroma_manager_1 import ChromaManager
+# from vdb_managers.drop.chroma_manager_1 import ChromaManager
 
 def validate_format_multi_query(questions: list) -> bool:
     """验证生成的结果是否符合格式要求 - 每个问题都以数字和句点开头
