@@ -1,9 +1,13 @@
 # RAG 框架集成
 
+<<<<<<< HEAD
 ## 一、项目概述
 本项目致力于整合RAG不同阶段的各种方法，通过简洁的函数调用实现多种RAG方案。基础向量数据库使用[Chroma](https://github.com/chroma-core/chroma)。
 
 ---
+=======
+项目进展记录：
+>>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
 
 ## 二、核心功能
 
@@ -26,6 +30,7 @@ def _upload_documents(
     """统一文档上传入口"""
     pass
 
+<<<<<<< HEAD
 # PDF文件专用上传接口
 def upload_pdf_file(*args, **kwargs) -> None:
     """上传PDF文件（继承_upload_documents参数）"""
@@ -114,3 +119,16 @@ for query in queries:
 
 final_answer = generate_final_response(query = query, retrieval_context = total_retrieval_results)
 ```
+=======
+2024-12-29
+- 进一步完善向量数据库管理等相关的类
+- 实现了模糊元数据过滤，思想是用户可能忘记或错误输入元数据信息，所以我们在后台自动匹配用户输入的元数据与标准元数据，实现模糊元数据过滤。可通过参数指定是否启用模糊元数据过滤。用户只需要遵循chroma metadata的格式即可通过自然语言进行匹配。
+
+2024-12-30 - 2024-1-7
+- 期末考试
+
+2024-1-8 - 2024-1-9
+- indexing中的summaried chunking
+
+2024-1-10
+>>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723

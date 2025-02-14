@@ -1,4 +1,8 @@
 .env
 droped/
 langchain_courses/
+<<<<<<< HEAD
 src\indexing\test_raptor_integration.ipynb
+=======
+
+>>>>>>> e503d4c6a721d0e7d96523baacc992414b9bc723
