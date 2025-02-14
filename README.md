@@ -83,7 +83,7 @@ class ChromaManager_RAPTOR:
 
 ### 4. 高级查询功能
 ✅ [多查询扩展 (Multi Query)](https://github.com/Cui-Peng-624/Modular_RAG/blob/main/src/query_transformations/multi_query.py)  
-✅ [问题分解 (Decomposition)](https://github.com/Cui-Peng-624/Modular_RAG/blob/main/src/query_transformations/decomposition.py) - 注意：其中单独回答和递归回答的代码仅仅是代码模板，需要根据实际情况进行修改。
+✅ [问题分解 (Decomposition)](https://github.com/Cui-Peng-624/Modular_RAG/blob/main/src/query_transformations/decomposition.py) - 注意：其中单独回答和递归回答的代码仅仅是代码模板，需要根据实际情况进行修改。           
 ✅ [退步提问 (Step Back)](https://github.com/Cui-Peng-624/Modular_RAG/blob/main/src/query_transformations/step_back.py)  
 ✅ [假设文档嵌入 (HyDE)](https://github.com/Cui-Peng-624/Modular_RAG/blob/main/src/query_transformations/hyde.py)
 
